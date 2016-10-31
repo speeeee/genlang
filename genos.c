@@ -25,6 +25,7 @@
 #define DIVF  15
 
 #define END_EXPR_RETURN 16
+#define END_GEN         19
 
 #define GENERATOR 17
 #define LAZY_GENERATOR 18
@@ -33,7 +34,8 @@
 #define DWORD_T  1
 #define GEN_T    2
 #define LGEN_T   3
-#define ANY      4
+#define SCP_T    4
+#define ENDG_T   5
 
 #define OPERATOR(EXPR, TYPE) \
   TYPE x = *(TYPE *)symbol_table.st[sz-2].data; TYPE y = *(TYPE *)symbol_table.st[sz-1].data; \
@@ -49,37 +51,59 @@ Data byte_string(int sz, ...) { va_list vl; va_start(vl,sz); Data a = malloc(sz*
 // TODO: switch `data' to type Item.
 typedef struct { char *name; Item item; } Symbol;
 Symbol symbol_d(char *name, Data data, int type) { return (Symbol) { name, item(type,(void *)data) }; }
-void item_free(Item a) { free(a.dat); }
-void symbol_free(Symbol a) { item_free(a.item); }
+Symbol symbol(char *name, void *data, int type) { return (Symbol) { name, item(type,data) }; }
+int item_free(Item a) { free(a.dat); return 0; }
+int symbol_free(Symbol a) { item_free(a.item); return 0; }
 typedef struct { int32_t iter; int32_t sz; Item *lst; } Generator;
+Generator generator(int32_t iter, int32_t sz, Item *lst) { return (Generator) { iter, sz, lst }; }
 
 typedef struct { Symbol *st; int scope; int sz; } SymbolTable;
 SymbolTable symbol_table;
+int get_sz(void) { return symbol_table.sz; }
 Symbol get_elem(int i) { return symbol_table.st[symbol_table.sz-1-i]; }
 
 // initialize symbol_table with global scope.
 void symbol_table_init(void) { symbol_table.st = malloc(SYMBOL_TABLE_SIZE*sizeof(Symbol));
   symbol_table.scope = 1;
-  symbol_table.st[symbol_table.sz = 0] = (symbol_d("SCOPE",byte_string(1,1),ANY));
+  symbol_table.st[symbol_table.sz = 0] = (symbol_d("SCOPE",byte_string(1,1),SCP_T));
   symbol_table.sz++; }
 void symbol_table_push(Symbol ns) {
   if(symbol_table.sz>=sizeof(symbol_table.st)) {
     symbol_table.st = realloc(symbol_table.st,2*sizeof(symbol_table.st)); }
   symbol_table.st[symbol_table.sz++] = ns; }
 void symbol_table_pop(void) { symbol_free(symbol_table.st[(symbol_table.sz--)-1]); }
+void symbol_table_drop(void) { symbol_table.sz--; }
+
+Data parse(Data);
+void parse_loop(Data d) { while((d = parse(d))); }
 
 Data parse(Data d) { switch(d[0]) {
   case END_EXPR: return NULL;
-  case SCOPE: return NULL;
+  case SCOPE: symbol_table_push(symbol_d("SCOPE",NULL,SCP_T)); d++;
+    /* DONE: parse_loop(d); -- may be better to traverse scope recursively;
+                           'd' must be address for this; look for other solutions first. */
+    Data nd; while((nd = parse(d))) { if(nd) { d = nd; } } d+=2; break;
+  case END_EXPR_RETURN: { Symbol x; int i;
+    for(i=get_sz()-2;(x=get_elem(i)).item.type!=SCP_T&&!symbol_free(x);i--);
+    symbol_free(x); symbol_table.st[i] = symbol_table.st[get_sz()-1];
+    symbol_table.sz = i+1; d++; return NULL; }
+  //case END_GEN: symbol_table_push(symbol_d("END_GEN",NULL,ENDG_T)); break;
+  case GENERATOR: { int32_t gsz; memcpy(&gsz,++d,sizeof(int32_t)); d+=sizeof(int32_t);
+    Item *lst = malloc(gsz*sizeof(Item));
+    for(int i=0;i<gsz;i++) { d = parse(d); lst[i] = get_elem(0).item; symbol_table_drop(); }
+    Generator *gen = malloc(sizeof(Generator)); *gen = generator(0,gsz,lst);
+    symbol_table_push(symbol("GEN",(void *)gen,GEN_T)); break; }
   case WORD: { Data nd = malloc(sizeof(int32_t)); memcpy(nd,++d,sizeof(int32_t));
                symbol_table_push(symbol_d("TEMP",nd,WORD_T)); d+=sizeof(int32_t); break; }
-  case DWORD: { Data nd = malloc(sizeof(int64_t)); memcpy(nd,d,sizeof(int64_t));
+  case DWORD: { Data nd = malloc(sizeof(int64_t)); memcpy(nd,++d,sizeof(int64_t));
                 symbol_table_push(symbol_d("TEMP",nd,DWORD_T)); d+=sizeof(int64_t)+1; break; }
   case PRINT_INT: printf("%i",*(int *)get_elem(0).item.dat); d++;
     symbol_table_pop(); break; } return d; }
 
 int main(int argc, char **argv) { symbol_table_init();
   // test 0
-  Data b = byte_string(7,WORD,4,0,0,0,PRINT_INT,END_EXPR);
+  //Data b = byte_string(7,WORD,4,0,0,0,PRINT_INT,END_EXPR);
+  // test 1
+  Data b = byte_string(11,GENERATOR,1,0,0,0,WORD,4,0,0,0,END_EXPR);
   while((b = parse(b)));
   return 0; }
