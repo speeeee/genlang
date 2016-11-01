@@ -15,20 +15,29 @@
 
 #define PRINT_INT 7
 
-#define ADDI  8
-#define SUBI  9
-#define DIVI  10
-#define MULI  11
-#define ADDF  12
-#define SUBF  13
-#define MULF  14
-#define DIVF  15
+#define ADDI_OPT  8
+#define SUBI_OPT  9
+#define DIVI_OPT  10
+#define MULI_OPT  11
+#define ADDF_OPT  12
+#define SUBF_OPT  13
+#define MULF_OPT  14
+#define DIVF_OPT  15
 
-#define END_EXPR_RETURN 16
-#define END_GEN         19
+#define ADDI 16
+#define SUBI 17
+#define MULI 18
+#define DIVI 19
+#define ADDF 20
+#define SUBF 21
+#define MULF 22
+#define DIVF 23
 
-#define GENERATOR 17
-#define LAZY_GENERATOR 18
+#define END_EXPR_RETURN 24
+#define END_GEN         25
+
+#define GENERATOR 26
+#define LAZY_GENERATOR 27
 
 #define WORD_T   0
 #define DWORD_T  1
@@ -37,9 +46,20 @@
 #define SCP_T    4
 #define ENDG_T   5
 
-#define OPERATOR(EXPR, TYPE) \
-  TYPE x = *(TYPE *)symbol_table.st[sz-2].data; TYPE y = *(TYPE *)symbol_table.st[sz-1].data; \
-  symbol_table_pop(); symbol_table_pop(); symbol_table_push(symbol("A",c_##TYPE(EXPR))); break;
+#define OPERATOR_OPT(EXPR, TYPE, RTYPE) \
+  TYPE x = *(TYPE *)get_elem(1).item.dat; TYPE y = *(TYPE *)get_elem(0).item.dat; \
+  symbol_table_pop(); symbol_table_pop(); symbol_table_push(symbol("A",c_##TYPE(EXPR),RTYPE)); d++; break;
+#define OPERATOR(EXPR, TYPE, RTYPE) \
+  TYPE x = *(TYPE *)get_elem(1).item.dat; TYPE y = *(TYPE *)get_elem(0).item.dat; \
+  symbol_table_pop(); symbol_table_pop(); symbol_table_push(symbol("A",c_##TYPE(EXPR),RTYPE)); break;
+
+#define SYM_FUN(TYPE) \
+  void *c_##TYPE(TYPE a) { TYPE *n = malloc(sizeof(TYPE)); \
+    *n = a; return (void *)n; }
+SYM_FUN(int32_t)
+SYM_FUN(int64_t)
+SYM_FUN(int8_t)
+SYM_FUN(double)
 
 // warning: returns pointer.
 typedef char *Data;
@@ -50,6 +70,7 @@ Data byte_string(int sz, ...) { va_list vl; va_start(vl,sz); Data a = malloc(sz*
   for(int i=0;i<sz;i++) { a[i] = (char)va_arg(vl,int); } va_end(vl); return a; }
 // TODO: switch `data' to type Item.
 typedef struct { char *name; Item item; } Symbol;
+// TODO?: use strdup for name so making non-det names later on isn't problematic.
 Symbol symbol_d(char *name, Data data, int type) { return (Symbol) { name, item(type,(void *)data) }; }
 Symbol symbol(char *name, void *data, int type) { return (Symbol) { name, item(type,data) }; }
 int item_free(Item a) { free(a.dat); return 0; }
@@ -98,12 +119,15 @@ Data parse(Data d) { switch(d[0]) {
   case DWORD: { Data nd = malloc(sizeof(int64_t)); memcpy(nd,++d,sizeof(int64_t));
                 symbol_table_push(symbol_d("TEMP",nd,DWORD_T)); d+=sizeof(int64_t)+1; break; }
   case PRINT_INT: printf("%i",*(int *)get_elem(0).item.dat); d++;
-    symbol_table_pop(); break; } return d; }
+    symbol_table_pop(); break;
+  case ADDI: { OPERATOR_OPT(x+y,int32_t,WORD_T) } } return d; }
 
 int main(int argc, char **argv) { symbol_table_init();
   // test 0
   //Data b = byte_string(7,WORD,4,0,0,0,PRINT_INT,END_EXPR);
   // test 1
-  Data b = byte_string(11,GENERATOR,1,0,0,0,WORD,4,0,0,0,END_EXPR);
+  //Data b = byte_string(11,GENERATOR,1,0,0,0,WORD,4,0,0,0,END_EXPR);
+  // test 2
+  Data b = byte_string(13,WORD,4,0,0,0,WORD,5,0,0,0,ADDI,PRINT_INT,END_EXPR);
   while((b = parse(b)));
   return 0; }
