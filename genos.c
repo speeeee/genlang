@@ -38,6 +38,17 @@
 
 #define GENERATOR 26
 #define LAZY_GENERATOR 27
+#define REST 28
+
+// define function and push to symbol table.
+#define DFUN 29
+// call function
+#define CFUN 30
+#define EFUN 32
+#define X    33
+
+// looping with generators (loops until type `fail' is returned).
+#define LOOP 34
 
 #define WORD_T   0
 #define DWORD_T  1
@@ -45,10 +56,15 @@
 #define LGEN_T   3
 #define SCP_T    4
 #define ENDG_T   5
+#define FUN_T    6
+#define FAIL     7
 
 #define OPERATOR_OPT(EXPR, TYPE, RTYPE) \
-  TYPE x = *(TYPE *)get_elem(1).item.dat; TYPE y = *(TYPE *)get_elem(0).item.dat; \
-  symbol_table_pop(); symbol_table_pop(); symbol_table_push(symbol("A",c_##TYPE(EXPR),RTYPE)); d++; break;
+  if(get_elem(0).item.type==FAIL||get_elem(1).item.type==FAIL) { \
+    symbol_table_pop(); symbol_table_pop(); symbol_table_push_fail(); } \
+  else { TYPE x = *(TYPE *)get_elem(1).item.dat; TYPE y = *(TYPE *)get_elem(0).item.dat; \
+    symbol_table_pop(); symbol_table_pop(); symbol_table_push(symbol("A",c_##TYPE(EXPR),RTYPE)); } \
+  d++; break;
 #define OPERATOR(EXPR, TYPE, RTYPE) \
   TYPE x = *(TYPE *)get_elem(1).item.dat; TYPE y = *(TYPE *)get_elem(0).item.dat; \
   symbol_table_pop(); symbol_table_pop(); symbol_table_push(symbol("A",c_##TYPE(EXPR),RTYPE)); break;
@@ -60,6 +76,11 @@ SYM_FUN(int32_t)
 SYM_FUN(int64_t)
 SYM_FUN(int8_t)
 SYM_FUN(double)
+
+// TODO: add generators to general evaluation.
+// TODO: make HEAD and REST opcodes for generators.
+// TODO: make CFUN for anonymous functions.
+// TODO: add for generators EVERY, OR, etc.
 
 // warning: returns pointer.
 typedef char *Data;
@@ -77,6 +98,8 @@ int item_free(Item a) { free(a.dat); return 0; }
 int symbol_free(Symbol a) { item_free(a.item); return 0; }
 typedef struct { int32_t iter; int32_t sz; Item *lst; } Generator;
 Generator generator(int32_t iter, int32_t sz, Item *lst) { return (Generator) { iter, sz, lst }; }
+// return 0 if succeeds; return -1 if generator is null.
+int next_gen(Generator *a) { if(a->iter>=a->sz) { return -1; } a->iter++; return 0; }
 
 typedef struct { Symbol *st; int scope; int sz; } SymbolTable;
 SymbolTable symbol_table;
@@ -94,9 +117,15 @@ void symbol_table_push(Symbol ns) {
   symbol_table.st[symbol_table.sz++] = ns; }
 void symbol_table_pop(void) { symbol_free(symbol_table.st[(symbol_table.sz--)-1]); }
 void symbol_table_drop(void) { symbol_table.sz--; }
+void symbol_table_push_fail(void) { symbol_table_push(symbol_d("FAILURE",NULL,FAIL)); }
 
 Data parse(Data);
 void parse_loop(Data d) { while((d = parse(d))); }
+
+void print_int(Data *d) { if(get_elem(0).item.type==FAIL) {
+    symbol_table_pop(); symbol_table_push_fail(); }
+  else { printf("%i",*(int *)get_elem(0).item.dat);
+    symbol_table_pop(); } (*d)++; }
 
 Data parse(Data d) { switch(d[0]) {
   case END_EXPR: return NULL;
@@ -118,9 +147,18 @@ Data parse(Data d) { switch(d[0]) {
                symbol_table_push(symbol_d("TEMP",nd,WORD_T)); d+=sizeof(int32_t); break; }
   case DWORD: { Data nd = malloc(sizeof(int64_t)); memcpy(nd,++d,sizeof(int64_t));
                 symbol_table_push(symbol_d("TEMP",nd,DWORD_T)); d+=sizeof(int64_t)+1; break; }
-  case PRINT_INT: printf("%i",*(int *)get_elem(0).item.dat); d++;
-    symbol_table_pop(); break;
-  case ADDI: { OPERATOR_OPT(x+y,int32_t,WORD_T) } } return d; }
+  case PRINT_INT: /*printf("%i",*(int *)get_elem(0).item.dat); d++;
+    symbol_table_pop();*/ print_int(&d); break;
+  case ADDI: { OPERATOR_OPT(x+y,int32_t,WORD_T) }
+  case REST: { int a = next_gen((Generator *)get_elem(0).item.dat);
+    if(a) { symbol_table_pop(); symbol_table_push_fail(); } d++; break; }
+  case DFUN: { int q; for(q=0;d[q+1]!=EFUN;q++); Data nd; nd = malloc((q+1)*sizeof(int8_t));
+    nd = memcpy(nd,++d,q); symbol_table_push(symbol("FUN",nd,FUN_T));
+    d+=q+1; break; }
+  case CALL: { int ind; memcpy(&ind,++d,sizeof(int32_t)); d+=sizeof(int32_t);
+    //int ind = *(int32_t *)get_elem(0).item.dat;
+    Data q = (Data)get_elem(get_sz()-1-ind).item.dat;
+    while((q = parse(q))); break; } } return d; }
 
 int main(int argc, char **argv) { symbol_table_init();
   // test 0
@@ -128,6 +166,8 @@ int main(int argc, char **argv) { symbol_table_init();
   // test 1
   //Data b = byte_string(11,GENERATOR,1,0,0,0,WORD,4,0,0,0,END_EXPR);
   // test 2
-  Data b = byte_string(13,WORD,4,0,0,0,WORD,5,0,0,0,ADDI,PRINT_INT,END_EXPR);
+  //Data b = byte_string(13,WORD,4,0,0,0,WORD,5,0,0,0,ADDI,PRINT_INT,END_EXPR);
+  // test 3
+  Data b = byte_string(15,DFUN,PRINT_INT,END_EXPR,EFUN,WORD,4,0,0,0,CALL,1,0,0,0,END_EXPR);
   while((b = parse(b)));
   return 0; }
