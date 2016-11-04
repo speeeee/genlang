@@ -50,6 +50,8 @@
 // looping with generators (loops until type `fail' is returned).
 #define LOOP 34
 
+#define COPY_GEN 35
+
 #define WORD_T   0
 #define DWORD_T  1
 #define GEN_T    2
@@ -77,7 +79,7 @@ SYM_FUN(int64_t)
 SYM_FUN(int8_t)
 SYM_FUN(double)
 
-// TODO: add generators to general evaluation.
+// DONE: add generators to general evaluation.
 // TODO: make HEAD and REST opcodes for generators.
 // TODO: make CFUN for anonymous functions.
 // TODO: add for generators EVERY, OR, etc.
@@ -94,10 +96,13 @@ typedef struct { char *name; Item item; } Symbol;
 // TODO?: use strdup for name so making non-det names later on isn't problematic.
 Symbol symbol_d(char *name, Data data, int type) { return (Symbol) { name, item(type,(void *)data) }; }
 Symbol symbol(char *name, void *data, int type) { return (Symbol) { name, item(type,data) }; }
+// rewrite `item_free' for all types.
+// generators are special in that `lst' is only freed if the `orig' flag is true.
 int item_free(Item a) { free(a.dat); return 0; }
 int symbol_free(Symbol a) { item_free(a.item); return 0; }
-typedef struct { int32_t iter; int32_t sz; Item *lst; } Generator;
-Generator generator(int32_t iter, int32_t sz, Item *lst) { return (Generator) { iter, sz, lst }; }
+typedef struct { int32_t iter; int32_t orig; int32_t sz; Item *lst; } Generator;
+Generator generator(int32_t iter, int32_t orig, int32_t sz, Item *lst) {
+  return (Generator) { iter, orig, sz, lst }; }
 // return 0 if succeeds; return -1 if generator is null.
 int next_gen(Generator *a) { if(a->iter>=a->sz) { return -1; } a->iter++; return 0; }
 
@@ -127,11 +132,17 @@ void print_int(Data *d) { if(get_elem(0).item.type==FAIL) {
   else { printf("%i",*(int *)get_elem(0).item.dat);
     symbol_table_pop(); } (*d)++; }
 
+// change call and copy_gen to take int64_t?
 Data parse(Data d) { switch(d[0]) {
   case END_EXPR: return NULL;
   case SCOPE: symbol_table_push(symbol_d("SCOPE",NULL,SCP_T)); d++;
     /* DONE: parse_loop(d); -- may be better to traverse scope recursively;
                            'd' must be address for this; look for other solutions first. */
+    /*int isz = 0; int *iters = malloc(sizeof(int));
+    // TODO: actually finish this.
+    for(int i=0;i<get_sz();i++) {
+      if(get_elem(get_sz()-i-1).item.type==GEN_T) {
+        iters = realloc(iters,++isz*sizeof(int)); } }*/
     Data nd; while((nd = parse(d))) { if(nd) { d = nd; } } d+=2; break;
   case END_EXPR_RETURN: { Symbol x; int i;
     for(i=get_sz()-2;(x=get_elem(i)).item.type!=SCP_T&&!symbol_free(x);i--);
@@ -141,8 +152,12 @@ Data parse(Data d) { switch(d[0]) {
   case GENERATOR: { int32_t gsz; memcpy(&gsz,++d,sizeof(int32_t)); d+=sizeof(int32_t);
     Item *lst = malloc(gsz*sizeof(Item));
     for(int i=0;i<gsz;i++) { d = parse(d); lst[i] = get_elem(0).item; symbol_table_drop(); }
-    Generator *gen = malloc(sizeof(Generator)); *gen = generator(0,gsz,lst);
+    Generator *gen = malloc(sizeof(Generator)); *gen = generator(0,1,gsz,lst);
     symbol_table_push(symbol("GEN",(void *)gen,GEN_T)); break; }
+  case COPY_GEN: { int ind; memcpy(&ind,++d,sizeof(int32_t)); d+=sizeof(int32_t);
+    Generator *e = malloc(sizeof(Generator)); 
+    Generator q = *(Generator *)get_elem(get_sz()-1-ind).item.dat;
+    *e = generator(q.iter,0,q.sz,q.lst); symbol_table_push(symbol("CGEN",(void *)e,GEN_T)); break; }
   case WORD: { Data nd = malloc(sizeof(int32_t)); memcpy(nd,++d,sizeof(int32_t));
                symbol_table_push(symbol_d("TEMP",nd,WORD_T)); d+=sizeof(int32_t); break; }
   case DWORD: { Data nd = malloc(sizeof(int64_t)); memcpy(nd,++d,sizeof(int64_t));
@@ -160,6 +175,8 @@ Data parse(Data d) { switch(d[0]) {
     Data q = (Data)get_elem(get_sz()-1-ind).item.dat;
     while((q = parse(q))); break; } } return d; }
 
+// TODO: when referencing a generator in a new scope, it will be given a new iterator for that
+//     : scope.  a simple copy opcode might work.
 int main(int argc, char **argv) { symbol_table_init();
   // test 0
   //Data b = byte_string(7,WORD,4,0,0,0,PRINT_INT,END_EXPR);
