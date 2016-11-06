@@ -38,19 +38,22 @@
 
 #define GENERATOR 26
 #define LAZY_GENERATOR 27
-#define REST 28
+#define REST 28 //
 
 // define function and push to symbol table.
 #define DFUN 29
 // call function
-#define CFUN 30
+#define CFUN 30 //
 #define EFUN 32
 #define X    33
 
 // looping with generators (loops until type `fail' is returned).
-#define LOOP 34
+#define LOOP 34 //
 
 #define COPY_GEN 35
+#define HEAD     36
+
+#define OR       37
 
 #define WORD_T   0
 #define DWORD_T  1
@@ -80,9 +83,12 @@ SYM_FUN(int8_t)
 SYM_FUN(double)
 
 // DONE: add generators to general evaluation.
-// TODO: make HEAD and REST opcodes for generators.
+// DONE: make HEAD and REST opcodes for generators.
 // TODO: make CFUN for anonymous functions.
-// TODO: add for generators EVERY, OR, etc.
+// TODO: add for generators EVERY, OR, etc.  see `notes2.txt'.
+
+// DONEi define OR. untested
+// TODO: up next is testing recursion.
 
 // warning: returns pointer.
 typedef char *Data;
@@ -91,11 +97,12 @@ typedef struct { int type; void *dat; } Item;
 Item item(int type, void *dat) { return (Item) { type, dat }; }
 Data byte_string(int sz, ...) { va_list vl; va_start(vl,sz); Data a = malloc(sz*sizeof(char));
   for(int i=0;i<sz;i++) { a[i] = (char)va_arg(vl,int); } va_end(vl); return a; }
-// TODO: switch `data' to type Item.
+// DONE: switch `data' to type Item.
 typedef struct { char *name; Item item; } Symbol;
 // TODO?: use strdup for name so making non-det names later on isn't problematic.
 Symbol symbol_d(char *name, Data data, int type) { return (Symbol) { name, item(type,(void *)data) }; }
 Symbol symbol(char *name, void *data, int type) { return (Symbol) { name, item(type,data) }; }
+Symbol symbol_i(char *name, Item data) { return (Symbol) { name, data }; }
 // rewrite `item_free' for all types.
 // generators are special in that `lst' is only freed if the `orig' flag is true.
 int item_free(Item a) { free(a.dat); return 0; }
@@ -158,12 +165,19 @@ Data parse(Data d) { switch(d[0]) {
     Generator *e = malloc(sizeof(Generator)); 
     Generator q = *(Generator *)get_elem(get_sz()-1-ind).item.dat;
     *e = generator(q.iter,0,q.sz,q.lst); symbol_table_push(symbol("CGEN",(void *)e,GEN_T)); break; }
+  case HEAD: { Generator *a = (Generator *)get_elem(0).item.dat;
+    if(a->iter>=a->sz) { symbol_table_push_fail(); }
+    else { symbol_table_push(symbol_i("FROM_GEN",a->lst[a->iter++])); } d++; break; }
   case WORD: { Data nd = malloc(sizeof(int32_t)); memcpy(nd,++d,sizeof(int32_t));
                symbol_table_push(symbol_d("TEMP",nd,WORD_T)); d+=sizeof(int32_t); break; }
   case DWORD: { Data nd = malloc(sizeof(int64_t)); memcpy(nd,++d,sizeof(int64_t));
                 symbol_table_push(symbol_d("TEMP",nd,DWORD_T)); d+=sizeof(int64_t)+1; break; }
   case PRINT_INT: /*printf("%i",*(int *)get_elem(0).item.dat); d++;
     symbol_table_pop();*/ print_int(&d); break;
+  case OR: { // succeeds if up to one of its operands fails.
+    int ta = get_elem(0).item.type; int tb = get_elem(1).item.type;
+    if(ta==FAIL&&tb==FAIL) { symbol_table_pop(); symbol_table_pop(); symbol_table_push_fail(); }
+    else { symbol_table_pop(); } break; }
   case ADDI: { OPERATOR_OPT(x+y,int32_t,WORD_T) }
   case REST: { int a = next_gen((Generator *)get_elem(0).item.dat);
     if(a) { symbol_table_pop(); symbol_table_push_fail(); } d++; break; }
@@ -175,7 +189,7 @@ Data parse(Data d) { switch(d[0]) {
     Data q = (Data)get_elem(get_sz()-1-ind).item.dat;
     while((q = parse(q))); break; } } return d; }
 
-// TODO: when referencing a generator in a new scope, it will be given a new iterator for that
+// DONE: when referencing a generator in a new scope, it will be given a new iterator for that
 //     : scope.  a simple copy opcode might work.
 int main(int argc, char **argv) { symbol_table_init();
   // test 0
@@ -186,5 +200,8 @@ int main(int argc, char **argv) { symbol_table_init();
   //Data b = byte_string(13,WORD,4,0,0,0,WORD,5,0,0,0,ADDI,PRINT_INT,END_EXPR);
   // test 3
   Data b = byte_string(15,DFUN,PRINT_INT,END_EXPR,EFUN,WORD,4,0,0,0,CALL,1,0,0,0,END_EXPR);
+  // test 4
+  // TODO: OR test.
+  //Data b = byte_string(,
   while((b = parse(b)));
   return 0; }
