@@ -91,6 +91,8 @@ SYM_FUN(int64_t)
 SYM_FUN(int8_t)
 SYM_FUN(double)
 
+#define SZ_ARR(ARR) (sizeof(ARR)/sizeof(ARR[0]))
+
 // DONE: add generators to general evaluation.
 // DONE: make HEAD and REST opcodes for generators.
 // TODO: make CFUN for anonymous functions.
@@ -190,7 +192,8 @@ Data parse(Data d) { switch(d[0]) {
       symbol_table_pop(); symbol_table_pop(); symbol_table_push_fail(); }
     else { Generator *a = (Generator *)get_elem(1).item.dat;
       Item b = get_elem(0).item;
-      a->lst = realloc(a->lst,(++a->sz)*sizeof(Item));
+      // TODO: make sure this works.
+      if(++a->sz>SZ_ARR(a->lst)) { a->lst = realloc(a->lst,(a->sz)*sizeof(Item)); }
       a->lst[a->sz-1] = b; symbol_table_drop(); symbol_table_drop(); } d++; break; }
   case WORD: { Data nd = malloc(sizeof(int32_t)); memcpy(nd,++d,sizeof(int32_t));
                symbol_table_push(symbol_d("TEMP",nd,WORD_T)); d+=sizeof(int32_t); break; }
