@@ -101,7 +101,8 @@ SYM_FUN(double)
 
 // TODO: define X to be argument of function (first item before SCOPE).
 
-// TODO: reverse all generators to make consing O(1).
+// HOLD: reverse all generators to make consing O(1).
+// TODO: a lot of `symbol_table_drop's should be `symbol_table_pop's to stop memory leaks.
 
 // warning: returns pointer.
 typedef char *Data;
@@ -120,7 +121,7 @@ Symbol symbol_i(char *name, int orig, Item data) { return (Symbol) { name, orig,
 // rewrite `item_free' for all types.
 // generators are special in that `lst' is only freed if the `orig' flag is true.
 int item_free(Item a) { free(a.dat); return 0; }
-int symbol_free(Symbol a) { item_free(a.item); return 0; }
+int symbol_free(Symbol a) { if(a.orig) { item_free(a.item); } return 0; }
 typedef struct { int32_t iter; int32_t orig; int32_t sz; Item *lst; } Generator;
 Generator generator(int32_t iter, int32_t orig, int32_t sz, Item *lst) {
   return (Generator) { iter, orig, sz, lst }; }
@@ -182,7 +183,7 @@ Data parse(Data d) { switch(d[0]) {
     *e = generator(q.iter,0,q.sz,q.lst); symbol_table_push(symbol("CGEN",0,(void *)e,GEN_T)); break; }
   case HEAD: { Generator *a = (Generator *)get_elem(0).item.dat;
     if(a->iter>=a->sz) { symbol_table_pop(); symbol_table_push_fail(); }
-    else { symbol_table_drop();
+    else { symbol_table_pop();
       symbol_table_push(symbol_i("FROM_GEN",1,a->lst[a->iter++])); } d++; break; }
   case ENQUEUE: {
     if(get_elem(0).item.type==FAIL||get_elem(1).item.type==FAIL) {
