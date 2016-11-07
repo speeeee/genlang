@@ -52,8 +52,16 @@
 
 #define COPY_GEN 35
 #define HEAD     36
+#define ENQUEUE  37
 
-#define OR       37
+#define OR       38
+#define AND      39
+#define NOTHING  40
+
+#define EVERY 41
+
+#define GET 42
+#define POP 43
 
 #define WORD_T   0
 #define DWORD_T  1
@@ -63,16 +71,17 @@
 #define ENDG_T   5
 #define FUN_T    6
 #define FAIL     7
+#define SUCCESS  8
 
 #define OPERATOR_OPT(EXPR, TYPE, RTYPE) \
   if(get_elem(0).item.type==FAIL||get_elem(1).item.type==FAIL) { \
     symbol_table_pop(); symbol_table_pop(); symbol_table_push_fail(); } \
   else { TYPE x = *(TYPE *)get_elem(1).item.dat; TYPE y = *(TYPE *)get_elem(0).item.dat; \
-    symbol_table_pop(); symbol_table_pop(); symbol_table_push(symbol("A",c_##TYPE(EXPR),RTYPE)); } \
+    symbol_table_pop(); symbol_table_pop(); symbol_table_push(symbol("A",1,c_##TYPE(EXPR),RTYPE)); } \
   d++; break;
 #define OPERATOR(EXPR, TYPE, RTYPE) \
   TYPE x = *(TYPE *)get_elem(1).item.dat; TYPE y = *(TYPE *)get_elem(0).item.dat; \
-  symbol_table_pop(); symbol_table_pop(); symbol_table_push(symbol("A",c_##TYPE(EXPR),RTYPE)); break;
+  symbol_table_pop(); symbol_table_pop(); symbol_table_push(symbol("A",1,c_##TYPE(EXPR),RTYPE)); break;
 
 #define SYM_FUN(TYPE) \
   void *c_##TYPE(TYPE a) { TYPE *n = malloc(sizeof(TYPE)); \
@@ -90,6 +99,10 @@ SYM_FUN(double)
 // DONEi define OR. untested
 // TODO: up next is testing recursion.
 
+// TODO: define X to be argument of function (first item before SCOPE).
+
+// TODO: reverse all generators to make consing O(1).
+
 // warning: returns pointer.
 typedef char *Data;
 // Data, Generator, GeneratorFunc
@@ -98,11 +111,12 @@ Item item(int type, void *dat) { return (Item) { type, dat }; }
 Data byte_string(int sz, ...) { va_list vl; va_start(vl,sz); Data a = malloc(sz*sizeof(char));
   for(int i=0;i<sz;i++) { a[i] = (char)va_arg(vl,int); } va_end(vl); return a; }
 // DONE: switch `data' to type Item.
-typedef struct { char *name; Item item; } Symbol;
+typedef struct { char *name; int orig; Item item; } Symbol;
 // TODO?: use strdup for name so making non-det names later on isn't problematic.
-Symbol symbol_d(char *name, Data data, int type) { return (Symbol) { name, item(type,(void *)data) }; }
-Symbol symbol(char *name, void *data, int type) { return (Symbol) { name, item(type,data) }; }
-Symbol symbol_i(char *name, Item data) { return (Symbol) { name, data }; }
+Symbol symbol_d(char *name, Data data, int type) { return (Symbol) { name, 1, item(type,(void *)data) }; }
+Symbol symbol(char *name, int orig, void *data, int type) {
+  return (Symbol) { name, orig, item(type,data) }; }
+Symbol symbol_i(char *name, int orig, Item data) { return (Symbol) { name, orig, data }; }
 // rewrite `item_free' for all types.
 // generators are special in that `lst' is only freed if the `orig' flag is true.
 int item_free(Item a) { free(a.dat); return 0; }
@@ -130,6 +144,7 @@ void symbol_table_push(Symbol ns) {
 void symbol_table_pop(void) { symbol_free(symbol_table.st[(symbol_table.sz--)-1]); }
 void symbol_table_drop(void) { symbol_table.sz--; }
 void symbol_table_push_fail(void) { symbol_table_push(symbol_d("FAILURE",NULL,FAIL)); }
+void symbol_table_push_success(void) { symbol_table_push(symbol_d("SUCCESS",NULL,SUCCESS)); }
 
 Data parse(Data);
 void parse_loop(Data d) { while((d = parse(d))); }
@@ -160,30 +175,54 @@ Data parse(Data d) { switch(d[0]) {
     Item *lst = malloc(gsz*sizeof(Item));
     for(int i=0;i<gsz;i++) { d = parse(d); lst[i] = get_elem(0).item; symbol_table_drop(); }
     Generator *gen = malloc(sizeof(Generator)); *gen = generator(0,1,gsz,lst);
-    symbol_table_push(symbol("GEN",(void *)gen,GEN_T)); break; }
+    symbol_table_push(symbol("GEN",1,(void *)gen,GEN_T)); break; }
   case COPY_GEN: { int ind; memcpy(&ind,++d,sizeof(int32_t)); d+=sizeof(int32_t);
     Generator *e = malloc(sizeof(Generator)); 
     Generator q = *(Generator *)get_elem(get_sz()-1-ind).item.dat;
-    *e = generator(q.iter,0,q.sz,q.lst); symbol_table_push(symbol("CGEN",(void *)e,GEN_T)); break; }
+    *e = generator(q.iter,0,q.sz,q.lst); symbol_table_push(symbol("CGEN",0,(void *)e,GEN_T)); break; }
   case HEAD: { Generator *a = (Generator *)get_elem(0).item.dat;
-    if(a->iter>=a->sz) { symbol_table_push_fail(); }
-    else { symbol_table_push(symbol_i("FROM_GEN",a->lst[a->iter++])); } d++; break; }
+    if(a->iter>=a->sz) { symbol_table_pop(); symbol_table_push_fail(); }
+    else { symbol_table_drop();
+      symbol_table_push(symbol_i("FROM_GEN",1,a->lst[a->iter++])); } d++; break; }
+  case ENQUEUE: {
+    if(get_elem(0).item.type==FAIL||get_elem(1).item.type==FAIL) {
+      symbol_table_pop(); symbol_table_pop(); symbol_table_push_fail(); }
+    else { Generator *a = (Generator *)get_elem(1).item.dat;
+      Item b = get_elem(0).item;
+      a->lst = realloc(a->lst,(++a->sz)*sizeof(Item));
+      a->lst[a->sz-1] = b; symbol_table_drop(); symbol_table_drop(); } d++; break; }
   case WORD: { Data nd = malloc(sizeof(int32_t)); memcpy(nd,++d,sizeof(int32_t));
                symbol_table_push(symbol_d("TEMP",nd,WORD_T)); d+=sizeof(int32_t); break; }
   case DWORD: { Data nd = malloc(sizeof(int64_t)); memcpy(nd,++d,sizeof(int64_t));
                 symbol_table_push(symbol_d("TEMP",nd,DWORD_T)); d+=sizeof(int64_t)+1; break; }
   case PRINT_INT: /*printf("%i",*(int *)get_elem(0).item.dat); d++;
-    symbol_table_pop();*/ print_int(&d); break;
+    symbol_table_pop();*/ print_int(&d); symbol_table_push_success(); break;
   case OR: { // succeeds if up to one of its operands fails.
     int ta = get_elem(0).item.type; int tb = get_elem(1).item.type;
     if(ta==FAIL&&tb==FAIL) { symbol_table_pop(); symbol_table_pop(); symbol_table_push_fail(); }
     else { symbol_table_pop(); } break; }
+  case AND: { int ta = get_elem(0).item.type; int tb = get_elem(1).item.type;
+    if(ta==FAIL||tb==FAIL) { symbol_table_pop(); symbol_table_pop(); symbol_table_push_fail(); }
+    else { symbol_table_pop(); } break; }
+  case NOTHING: symbol_table_push_fail(); break;
   case ADDI: { OPERATOR_OPT(x+y,int32_t,WORD_T) }
   case REST: { int a = next_gen((Generator *)get_elem(0).item.dat);
     if(a) { symbol_table_pop(); symbol_table_push_fail(); } d++; break; }
-  case DFUN: { int q; for(q=0;d[q+1]!=EFUN;q++); Data nd; nd = malloc((q+1)*sizeof(int8_t));
+  case DFUN: { /*int q, i; // very big error here: just reads the bytes.
+                         // quick solution is to make emergency byte-length as an argument
+                         // for function definition.
+    for(q=0,i=0;d[q+1]!=EFUN||i--;q++) { d[q+1]==DFUN?i++:i; }
+    Data nd; nd = malloc((q+1)*sizeof(int8_t));
     nd = memcpy(nd,++d,q); symbol_table_push(symbol("FUN",nd,FUN_T));
-    d+=q+1; break; }
+    d+=q+1; break; }*/
+    int sz; memcpy(&sz,++d,sizeof(int32_t)); d+=sizeof(int32_t);
+    Data nd = malloc(sz*sizeof(char)); memcpy(nd,d,sz*sizeof(int8_t)); d+=sz;
+    symbol_table_push(symbol("FUN",1,nd,FUN_T));
+    break; }
+  //case EVERY: 
+  case GET: { int ind; memcpy(&ind,++d,sizeof(int32_t)); d+=sizeof(int32_t);
+    Item n = get_elem(get_sz()-1-ind).item; symbol_table_push(symbol_i("COPIED",0,n)); break; }
+  case POP: symbol_table_pop(); d++; break;
   case CALL: { int ind; memcpy(&ind,++d,sizeof(int32_t)); d+=sizeof(int32_t);
     //int ind = *(int32_t *)get_elem(0).item.dat;
     Data q = (Data)get_elem(get_sz()-1-ind).item.dat;
@@ -199,9 +238,18 @@ int main(int argc, char **argv) { symbol_table_init();
   // test 2
   //Data b = byte_string(13,WORD,4,0,0,0,WORD,5,0,0,0,ADDI,PRINT_INT,END_EXPR);
   // test 3
-  Data b = byte_string(15,DFUN,PRINT_INT,END_EXPR,EFUN,WORD,4,0,0,0,CALL,1,0,0,0,END_EXPR);
+  //Data b = byte_string(15,DFUN,PRINT_INT,END_EXPR,EFUN,WORD,4,0,0,0,CALL,1,0,0,0,END_EXPR);
   // test 4
   // TODO: OR test.
-  //Data b = byte_string(,
+  /*
+  Data b = byte_string(48    ,GENERATOR,2,0,0,0,WORD,2,0,0,0,WORD,3,0,0,0
+                             ,DFUN,23,0,0,0,COPY_GEN,1,0,0,0
+                               ,DFUN,8,0,0,0,HEAD,PRINT_INT,CALL,4,0,0,0,AND
+                               ,CALL,4,0,0,0
+                             ,CALL,2,0,0,0,END_EXPR);
+  */
+  // test 5
+  Data b = byte_string(29,GENERATOR,1,0,0,0,WORD,2,0,0,0,GET,1,0,0,0,WORD,1,0,0,0,ENQUEUE
+                         ,GET,1,0,0,0,HEAD,PRINT_INT,END_EXPR);//GET,1,0,0,0,HEAD,PRINT_INT,END_EXPR);
   while((b = parse(b)));
   return 0; }
