@@ -223,10 +223,14 @@ Data parse(Data d) { switch(d[0]) {
     Data nd = malloc(sz*sizeof(char)); memcpy(nd,d,sz*sizeof(int8_t)); d+=sz;
     symbol_table_push(symbol("FUN",1,nd,FUN_T));
     break; }
-  //case EVERY: 
+  // TODO: fail on `fail'.
+  case EVERY: { int ind; memcpy(&ind,++d,sizeof(int32_t)); d+=sizeof(int32_t);
+    Data q = (Data)get_elem(get_sz()-1-ind).item.dat; Data e = q;
+    do { while((q = parse(q))); q = e; } while(get_elem(0).item.type!=FAIL); }
   case GET: { int ind; memcpy(&ind,++d,sizeof(int32_t)); d+=sizeof(int32_t);
     Item n = get_elem(get_sz()-1-ind).item; symbol_table_push(symbol_i("COPIED",0,n)); break; }
   case POP: symbol_table_pop(); d++; break;
+  // TODO: fail on `fail'.
   case CALL: { int ind; memcpy(&ind,++d,sizeof(int32_t)); d+=sizeof(int32_t);
     //int ind = *(int32_t *)get_elem(0).item.dat;
     Data q = (Data)get_elem(get_sz()-1-ind).item.dat;
@@ -253,7 +257,11 @@ int main(int argc, char **argv) { symbol_table_init();
                              ,CALL,2,0,0,0,END_EXPR);
   */
   // test 5
-  Data b = byte_string(29,GENERATOR,1,0,0,0,WORD,2,0,0,0,GET,1,0,0,0,WORD,1,0,0,0,ENQUEUE
-                         ,GET,1,0,0,0,HEAD,PRINT_INT,END_EXPR);//GET,1,0,0,0,HEAD,PRINT_INT,END_EXPR);
+  //Data b = byte_string(36,GENERATOR,1,0,0,0,WORD,2,0,0,0,GET,1,0,0,0,WORD,1,0,0,0,ENQUEUE
+  //                       ,GET,1,0,0,0,HEAD,PRINT_INT,GET,1,0,0,0,HEAD,PRINT_INT,END_EXPR);
+  // test 6
+  Data b = byte_string(35,GENERATOR,2,0,0,0,WORD,2,0,0,0,WORD,1,0,0,0
+                         ,DFUN,9,0,0,0,GET,1,0,0,0,HEAD,PRINT_INT,POP,END_EXPR
+                         ,EVERY,2,0,0,0,END_EXPR);
   while((b = parse(b)));
   return 0; }
