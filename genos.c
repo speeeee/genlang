@@ -63,6 +63,8 @@
 #define GET 42
 #define POP 43
 
+#define NULL_GEN 44
+
 #define WORD_T   0
 #define DWORD_T  1
 #define GEN_T    2
@@ -105,6 +107,8 @@ SYM_FUN(double)
 
 // HOLD: reverse all generators to make consing O(1).
 // TODO: a lot of `symbol_table_drop's should be `symbol_table_pop's to stop memory leaks.
+
+// TODO: make short-circuiting AND.
 
 // warning: returns pointer.
 typedef char *Data;
@@ -157,6 +161,7 @@ void print_int(Data *d) { if(get_elem(0).item.type==FAIL) {
   else { printf("%i",*(int *)get_elem(0).item.dat);
     symbol_table_pop(); } (*d)++; }
 
+// TODO: test NULL_GEN wrt HEAD and ENQUEUE.
 // change call and copy_gen to take int64_t?
 Data parse(Data d) { switch(d[0]) {
   case END_EXPR: return NULL;
@@ -179,12 +184,14 @@ Data parse(Data d) { switch(d[0]) {
     for(int i=0;i<gsz;i++) { d = parse(d); lst[i] = get_elem(0).item; symbol_table_drop(); }
     Generator *gen = malloc(sizeof(Generator)); *gen = generator(0,1,gsz,lst);
     symbol_table_push(symbol("GEN",1,(void *)gen,GEN_T)); break; }
+  case NULL_GEN: { Generator *gen = malloc(sizeof(Generator)); *gen = generator(0,1,0,NULL);
+    symbol_table_push(symbol("NGEN",1,(void *)gen,GEN_T)); break; }
   case COPY_GEN: { int ind; memcpy(&ind,++d,sizeof(int32_t)); d+=sizeof(int32_t);
     Generator *e = malloc(sizeof(Generator)); 
     Generator q = *(Generator *)get_elem(get_sz()-1-ind).item.dat;
     *e = generator(q.iter,0,q.sz,q.lst); symbol_table_push(symbol("CGEN",0,(void *)e,GEN_T)); break; }
   case HEAD: { Generator *a = (Generator *)get_elem(0).item.dat;
-    if(a->iter>=a->sz) { symbol_table_pop(); symbol_table_push_fail(); }
+    if(a->iter>=a->sz||a->sz==0) { symbol_table_pop(); symbol_table_push_fail(); }
     else { symbol_table_pop();
       symbol_table_push(symbol_i("FROM_GEN",1,a->lst[a->iter++])); } d++; break; }
   case ENQUEUE: {
@@ -192,8 +199,9 @@ Data parse(Data d) { switch(d[0]) {
       symbol_table_pop(); symbol_table_pop(); symbol_table_push_fail(); }
     else { Generator *a = (Generator *)get_elem(1).item.dat;
       Item b = get_elem(0).item;
-      // TODO: make sure this works.
-      if(++a->sz>SZ_ARR(a->lst)) { a->lst = realloc(a->lst,(a->sz)*sizeof(Item)); }
+      // DONE: make sure this works. // done except for NULL_GEN.
+      if(!a->lst) { a->lst = malloc(sizeof(Item)); }
+      else { if(++a->sz>SZ_ARR(a->lst)) { a->lst = realloc(a->lst,(a->sz)*sizeof(Item)); } }
       a->lst[a->sz-1] = b; symbol_table_drop(); symbol_table_drop(); } d++; break; }
   case WORD: { Data nd = malloc(sizeof(int32_t)); memcpy(nd,++d,sizeof(int32_t));
                symbol_table_push(symbol_d("TEMP",nd,WORD_T)); d+=sizeof(int32_t); break; }
@@ -205,9 +213,14 @@ Data parse(Data d) { switch(d[0]) {
     int ta = get_elem(0).item.type; int tb = get_elem(1).item.type;
     if(ta==FAIL&&tb==FAIL) { symbol_table_pop(); symbol_table_pop(); symbol_table_push_fail(); }
     else { symbol_table_pop(); } break; }
-  case AND: { int ta = get_elem(0).item.type; int tb = get_elem(1).item.type;
+  /*case AND: { int ta = get_elem(0).item.type; int tb = get_elem(1).item.type;
     if(ta==FAIL||tb==FAIL) { symbol_table_pop(); symbol_table_pop(); symbol_table_push_fail(); }
-    else { symbol_table_pop(); } break; }
+    else { symbol_table_pop(); } d++; break; }*/
+  // AND takes an amount of bytes to skip if the top of the stack shows `fail'.
+  // returns the right-most element if success. (reverse in HL-language).
+  case AND: { int sz; memcpy(&sz,++d,sizeof(int32_t)); d+=sizeof(int32_t);
+    int t = get_elem(0).item.type;
+    if(t==FAIL) { d+=sz; } else { symbol_table_pop(); } break; }
   case NOTHING: symbol_table_push_fail(); break;
   case ADDI: { OPERATOR_OPT(x+y,int32_t,WORD_T) }
   case REST: { int a = next_gen((Generator *)get_elem(0).item.dat);
