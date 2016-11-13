@@ -53,7 +53,7 @@
 ; string->prog :: [String] -> (x :: [Literal | x])
 (define (ch-list->prog lst) (foldr (lambda (x n) (cond
   [(char-whitespace? x) (if (empty? (car n)) n (cons '() n))]
-  [(member x '(#\) #\} #\] #\, #\;)) (cons (string x) (cdr n) #| inspect |#)]
+  [(member x '(#\) #\} #\] #\, #\;)) (cons (string x) (if (empty? (car n)) (cdr n) n))]
   [(member x '(#\( #\{ #\[)) ;(begin (displayln
     ;(splitf-at2 n (uc /= (case x [(#\() ")"] [(#\[) "]"] [(#\{) "}"]))))
     ((match-lambda [(list y z) (cons y (cdr z))])
@@ -62,7 +62,7 @@
 
 (define test1 (ch-list->prog (string->list "ab bc cd")))
 (define test0 (Literal (list (Literal 1 'int32)) 'generator))
-(define test2 (ch-list->prog (string->list "ab (cd ef)")))
+(define test2 (ch-list->prog (string->list "ab (cd ef) gh")))
 
 ; parsing rules:
 ;   take until a non-literal or symbol is found.
