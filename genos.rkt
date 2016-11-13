@@ -5,8 +5,8 @@
 ; this is a simple implementation of what will be compiled to the Genos bytecode.
 ; *MUTABLE-VALUE*
 
-(struct Literal (val type))
-(struct Function (name in out))
+(struct Literal (val type) #:transparent)
+(struct Function (name in out) #:transparent)
 
 ; *FLIST* :: [Function | SCOPE]
 ;   new functions are cons'ed in.
@@ -50,19 +50,34 @@
 ; TODO: define `split' for expression of whitespace or ([{}]). splif-at recursive/fold.
 ;   [] is unscoped expr, {} is scoped expr.
 
-; string->prog :: [String] -> (x :: [Literal | x])
+; string->prog :: [String] -> (x :: [String | x])
 (define (ch-list->prog lst) (foldr (lambda (x n) (cond
   [(char-whitespace? x) (if (empty? (car n)) n (cons '() n))]
   [(member x '(#\) #\} #\] #\, #\;)) (cons (string x) (if (empty? (car n)) (cdr n) n))]
   [(member x '(#\( #\{ #\[)) ;(begin (displayln
     ;(splitf-at2 n (uc /= (case x [(#\() ")"] [(#\[) "]"] [(#\{) "}"]))))
-    ((match-lambda [(list y z) (cons y (cdr z))])
+    ((match-lambda [(list y z) (cons (cons `(,x) y) (cdr z))])
       (splitf-at2 n (uc /= (case x [(#\() ")"] [(#\[) "]"] [(#\{) "}"]))))]
   [else (cons-lit x n)])) '(()) lst))
+
+(define (ch-list->string lst) (map (lambda (x) 
+  (if (member (car x) '((#\{) (#\[) (#\())) (ch-list->string x)
+      (if (symbol? x) x (list->string x)))) lst))
+
+; tokenize :: (x :: [String | x]) -> (x :: [Literal | x])
+;   reads each string (converted from char-list) and assigns some type.
+;   special types include expr (#\[), scope-expr (#\{), and symbol, which is then checked as a
+;     function in `parse'.
+(define (tokenize lst) (map (lambda (h) (cond
+  [(list? h) (Literal (tokenize (cdr h)) (case (car h) [("(") 'expr] [("[") 'ns-expr] [("}") 's-expr]))]
+  [(string->number h) (let ([a (string->number h)]) (if (integer? h) (Literal h 'int32)
+                                                                     (Literal h 'float64)))]
+  [else (Literal h 'symbol)])) lst))
 
 (define test1 (ch-list->prog (string->list "ab bc cd")))
 (define test0 (Literal (list (Literal 1 'int32)) 'generator))
 (define test2 (ch-list->prog (string->list "ab (cd ef) gh")))
+(define test3 (tokenize (ch-list->string test2)))
 
 ; parsing rules:
 ;   take until a non-literal or symbol is found.
