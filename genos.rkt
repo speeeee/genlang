@@ -13,7 +13,7 @@
 
 ; *FLIST* :: [Function | SCOPE]
 ;   new functions are cons'ed in.
-(define *FLIST* (list (Function "+" 1 '(int32 int32) 'int32 id) 'scope))
+(define *FLIST* (list (Function "+" 16 '(int32 int32) 'int32 id) 'scope))
 (define *OUTPUT* '())
 
 (define b-app bytes-append)
@@ -42,7 +42,7 @@
 
 ; show :: Literal -> ByteString
 ;   encodes in little-endian.
-(define (show l)
+(define (show l) (if (bytes? l) l
   (case (Literal-type l)
     [(int32) (b-app (bytes 0) (integer->integer-bytes (Literal-val l) 4 #f))]
     [(float64) (b-app (bytes 1) (real->floating-point-bytes (Literal-val l) 8))]
@@ -51,7 +51,7 @@
                    (cons (Literal (bytes 26 #| Generator |#) 'byte)
                      (cons (Literal (integer->integer-bytes (length (Literal-val l)) 4 #f) 'byte)
                          (Literal-val l)))))]
-    [else #"Error"]))
+    [else #"Error"])))
 
 (define (f-find-and-apply sd . n)
   (>>= (findf (lambda (x) (and (Function? x) (equal? (Function-name x) sd))) *FLIST*)
