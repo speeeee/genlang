@@ -54,7 +54,7 @@
     [else #"Error"]))
 
 (define (f-find-and-apply sd . n)
-  (>>= (findf *FLIST* (lambda (x) (and (Function? x) (equal? (Function-name x) sd))))
+  (>>= (findf (lambda (x) (and (Function? x) (equal? (Function-name x) sd))) *FLIST*)
        (lambda (q) (f-apply q n))))
 
 (define (nfun! name in out) (set! *FLIST* (cons (Function name in out) *FLIST*)))
@@ -64,7 +64,8 @@
 ;   [] is unscoped expr, {} is scoped expr.
 
 (define (f-apply f lst) (Literal
-  (b-app (bytes-append* (map show lst)) (bytes 1) (integer->integer-bytes (Function-ind f)))
+  (b-app (bytes-append* (map show lst)) (bytes 1)
+         (integer->integer-bytes (Function-ind f) 4 #f))
   (Function-out f)))
 
 ; string->prog :: [String] -> (x :: [String | x])
@@ -87,8 +88,8 @@
 ;     function in `parse'.
 (define (tokenize lst) (map (lambda (h) (cond
   [(list? h) (Literal (tokenize (cdr h)) (case (car h) [("(") 'expr] [("[") 'ns-expr] [("}") 's-expr]))]
-  [(string->number h) (let ([a (string->number h)]) (if (integer? h) (Literal h 'int32)
-                                                                     (Literal h 'float64)))]
+  [(string->number h) (let ([a (string->number h)]) (if (integer? a) (Literal a 'int32)
+                                                                     (Literal a 'float64)))]
   [else (Literal h 'symbol)])) lst))
 
 (define (parse lst) (match lst
@@ -101,6 +102,7 @@
 (define test0 (Literal (list (Literal 1 'int32)) 'generator))
 (define test2 (ch-list->prog (string->list "ab (cd ef) gh")))
 (define test3 (tokenize (ch-list->string test2)))
+(define test4 (parse (tokenize (ch-list->string (ch-list->prog (string->list "1 + 2"))))))
 
 ; parsing rules:
 ;   take until a non-literal or symbol is found.
