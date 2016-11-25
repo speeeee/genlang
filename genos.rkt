@@ -6,14 +6,14 @@
 ; *MUTABLE-VALUE*
 
 (struct Literal (val type) #:transparent)
-(struct Function (name ind in out runtime) #:transparent)
+(struct Function (name ind in out runtime op?) #:transparent)
 ; First, whatever is in runtime is run (could be id for non-runtime functions).
 
 (define (id x) x)
 
 ; *FLIST* :: [Function | SCOPE]
 ;   new functions are cons'ed in.
-(define *FLIST* (list (Function "+" 16 '(int32 int32) 'int32 id) 'scope))
+(define *FLIST* (list (Function "+" 16 '(int32 int32) 'int32 id #t) 'scope))
 (define *OUTPUT* '())
 
 (define b-app bytes-append)
@@ -64,8 +64,10 @@
 ;   [] is unscoped expr, {} is scoped expr.
 
 (define (f-apply f lst) (Literal
-  (b-app (bytes-append* (map show lst)) (bytes 1)
-         (integer->integer-bytes (Function-ind f) 4 #f))
+  (b-app (bytes-append* (map show lst))
+         (if (Function-op? f) (bytes (Function-ind f))
+                              (b-app (bytes 1)
+                                     (integer->integer-bytes (Function-ind f) 4 #f))))
   (Function-out f)))
 
 ; string->prog :: [String] -> (x :: [String | x])
